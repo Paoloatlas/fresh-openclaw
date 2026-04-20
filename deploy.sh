@@ -7,7 +7,7 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-DEPLOYMENTS_BASE="/home/oc-deployments"
+DEPLOYMENTS_BASE="$HOME/oc-deployments"
 
 echo "==================================="
 echo "  Fresh OpenClaw — Deploy"
