@@ -7,13 +7,44 @@
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
-CONFIG_DIR="$SCRIPT_DIR/openclaw-home/.openclaw"
-WORKSPACE_DIR="$CONFIG_DIR/workspace"
+DEPLOYMENTS_BASE="/home/oc-deployments"
 
 echo "==================================="
 echo "  Fresh OpenClaw — Deploy"
 echo "==================================="
 echo ""
+
+# ── Client name ───────────────────────────────────────────────────────────────
+read -rp "  Client name (e.g. sarah, acme-corp): " CLIENT_NAME
+CLIENT_NAME=$(echo "$CLIENT_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+
+if [ -z "$CLIENT_NAME" ]; then
+    echo "ERROR: Client name is required."
+    exit 1
+fi
+
+DEPLOY_DIR="$DEPLOYMENTS_BASE/$CLIENT_NAME"
+
+if [ -d "$DEPLOY_DIR" ]; then
+    echo "  WARNING: $DEPLOY_DIR already exists."
+    read -rp "  Overwrite? [y/N]: " CONFIRM
+    if [[ ! "${CONFIRM,,}" == "y" ]]; then
+        echo "  Aborted."
+        exit 0
+    fi
+fi
+
+mkdir -p "$DEPLOY_DIR"
+cp "$SCRIPT_DIR/docker-compose.yml" "$DEPLOY_DIR/docker-compose.yml"
+cp "$SCRIPT_DIR/.env.example" "$DEPLOY_DIR/.env.example"
+cp "$SCRIPT_DIR/openclaw.json" "$DEPLOY_DIR/openclaw.json"
+mkdir -p "$DEPLOY_DIR/openclaw-home/.openclaw/workspace"
+
+echo "  deploying to $DEPLOY_DIR"
+echo ""
+
+CONFIG_DIR="$DEPLOY_DIR/openclaw-home/.openclaw"
+WORKSPACE_DIR="$CONFIG_DIR/workspace"
 
 # ── Preflight ─────────────────────────────────────────────────────────────────
 for cmd in docker jq openssl; do
@@ -36,16 +67,16 @@ fi
 # ── Phase 1: Generate token + write .env ─────────────────────────────────────
 echo "[1/6] Generating config..."
 
-if [ -f "$SCRIPT_DIR/.env" ]; then
+if [ -f "$DEPLOY_DIR/.env" ]; then
     echo "  .env already exists — skipping token generation"
-    source "$SCRIPT_DIR/.env"
+    source "$DEPLOY_DIR/.env"
 else
     GATEWAY_TOKEN=$(openssl rand -hex 24)
-    sed "s/replace-with-your-token/$GATEWAY_TOKEN/" "$SCRIPT_DIR/.env.example" > "$SCRIPT_DIR/.env"
+    sed "s/replace-with-your-token/$GATEWAY_TOKEN/" "$SCRIPT_DIR/.env.example" > "$DEPLOY_DIR/.env"
     echo "  generated gateway token"
 fi
 
-source "$SCRIPT_DIR/.env"
+source "$DEPLOY_DIR/.env"
 
 if [ -z "${GATEWAY_TOKEN:-}" ]; then
     echo "ERROR: GATEWAY_TOKEN is not set in .env"
@@ -72,14 +103,14 @@ fi
 mkdir -p "$CONFIG_DIR"
 jq --arg token "$GATEWAY_TOKEN" \
     '.gateway.auth.token = $token' \
-    "$SCRIPT_DIR/openclaw.json" > "$CONFIG_DIR/openclaw.json"
+    "$DEPLOY_DIR/openclaw.json" > "$CONFIG_DIR/openclaw.json"
 
 echo "  patched token into openclaw.json"
 echo "  done"
 
 # ── Phase 2: Pull image ───────────────────────────────────────────────────────
 echo "[2/6] Pulling OpenClaw image..."
-cd "$SCRIPT_DIR"
+cd "$DEPLOY_DIR"
 docker compose pull
 echo "  done"
 
@@ -92,7 +123,7 @@ docker compose run --rm openclaw-cli setup
 # Restore our openclaw.json (setup overwrites it)
 jq --arg token "$GATEWAY_TOKEN" \
     '.gateway.auth.token = $token' \
-    "$SCRIPT_DIR/openclaw.json" > "$CONFIG_DIR/openclaw.json"
+    "$DEPLOY_DIR/openclaw.json" > "$CONFIG_DIR/openclaw.json"
 
 echo "  restored openclaw.json with our config"
 echo "  done"
@@ -166,8 +197,9 @@ echo "  OpenClaw is running"
 echo "==================================="
 echo ""
 echo "  Gateway:  http://localhost:${GATEWAY_PORT:-18789}"
-echo "  Logs:     docker compose logs -f"
-echo "  TUI:      docker compose run --rm openclaw-cli tui --token $GATEWAY_TOKEN"
+echo "  Location: $DEPLOY_DIR"
+echo "  Logs:     cd $DEPLOY_DIR && docker compose logs -f"
+echo "  TUI:      cd $DEPLOY_DIR && docker compose run --rm openclaw-cli tui --token $GATEWAY_TOKEN"
 echo ""
 echo "  Access the control UI via Tailscale:"
 echo "  http://<tailscale-ip>:${GATEWAY_PORT:-18789}"
