@@ -117,6 +117,12 @@ echo "  done"
 # ── Phase 3: openclaw setup ───────────────────────────────────────────────────
 echo "[3/6] Running openclaw setup..."
 
+# Fix permissions so the container's node user (UID 1000) can write to the workspace
+docker run --rm -u root \
+    -v "$DEPLOY_DIR/openclaw-home/.openclaw:/data" \
+    ghcr.io/openclaw/openclaw:latest \
+    chmod -R a+rwX /data
+
 # Setup initializes internal state but overwrites openclaw.json — we restore ours after.
 docker compose run --rm openclaw-cli setup
 
