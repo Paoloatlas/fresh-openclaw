@@ -37,7 +37,7 @@ fi
 mkdir -p "$DEPLOY_DIR"
 cp "$SCRIPT_DIR/docker-compose.yml" "$DEPLOY_DIR/docker-compose.yml"
 cp "$SCRIPT_DIR/.env.example" "$DEPLOY_DIR/.env.example"
-cp "$SCRIPT_DIR/openclaw.json" "$DEPLOY_DIR/openclaw.json"
+cp "$SCRIPT_DIR/openclaw-home/.openclaw/openclaw.json" "$DEPLOY_DIR/openclaw.json"
 mkdir -p "$DEPLOY_DIR/openclaw-home/.openclaw/workspace"
 
 echo "  deploying to $DEPLOY_DIR"
