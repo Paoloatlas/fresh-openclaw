@@ -11,6 +11,13 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEPLOYMENTS_BASE="$HOME/oc-deployments"
 
+fix_perms() {
+    docker run --rm -u root \
+        -v "$CONFIG_DIR:/data" \
+        ghcr.io/openclaw/openclaw:latest \
+        chmod -R a+rwX /data
+}
+
 # ── Destroy mode ──────────────────────────────────────────────────────────────
 if [ "${1:-}" == "destroy" ]; then
     read -rp "  Client name to destroy: " CLIENT_NAME
@@ -64,14 +71,6 @@ fi
 
 CONFIG_DIR="$DEPLOY_DIR/openclaw-home/.openclaw"
 WORKSPACE_DIR="$CONFIG_DIR/workspace"
-
-# Opens permissions on all container-written files so the host deploy user can read/edit/delete them.
-fix_perms() {
-    docker run --rm -u root \
-        -v "$CONFIG_DIR:/data" \
-        ghcr.io/openclaw/openclaw:latest \
-        chmod -R a+rwX /data
-}
 
 # ── Preflight ─────────────────────────────────────────────────────────────────
 for cmd in docker jq openssl; do
