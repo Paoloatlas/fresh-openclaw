@@ -2,12 +2,38 @@
 # deploy.sh — Fresh OpenClaw deployment.
 # Assumes setup.sh has already been run on this VPS.
 #
-# Usage: bash deploy.sh
+# Usage:
+#   bash deploy.sh            — deploy a new client
+#   bash deploy.sh destroy    — stop and remove a client
 
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 DEPLOYMENTS_BASE="$HOME/oc-deployments"
+
+# ── Destroy mode ──────────────────────────────────────────────────────────────
+if [ "${1:-}" == "destroy" ]; then
+    read -rp "  Client name to destroy: " CLIENT_NAME
+    CLIENT_NAME=$(echo "$CLIENT_NAME" | tr '[:upper:]' '[:lower:]' | tr ' ' '-')
+    DEPLOY_DIR="$DEPLOYMENTS_BASE/$CLIENT_NAME"
+
+    if [ ! -d "$DEPLOY_DIR" ]; then
+        echo "ERROR: $DEPLOY_DIR not found."
+        exit 1
+    fi
+
+    read -rp "  Destroy $DEPLOY_DIR? This is permanent. [y/N]: " CONFIRM
+    if [[ ! "${CONFIRM,,}" == "y" ]]; then
+        echo "  Aborted."
+        exit 0
+    fi
+
+    cd "$DEPLOY_DIR"
+    docker compose down 2>/dev/null || true
+    rm -rf "$DEPLOY_DIR"
+    echo "  $CLIENT_NAME destroyed."
+    exit 0
+fi
 
 echo "==================================="
 echo "  Fresh OpenClaw — Deploy"
@@ -34,11 +60,11 @@ if [ -d "$DEPLOY_DIR" ]; then
     fi
 fi
 
-mkdir -p "$DEPLOY_DIR"
+mkdir -p "$DEPLOY_DIR/openclaw-home/.openclaw/workspace"
+chmod -R a+rwX "$DEPLOY_DIR"
 cp "$SCRIPT_DIR/docker-compose.yml" "$DEPLOY_DIR/docker-compose.yml"
 cp "$SCRIPT_DIR/.env.example" "$DEPLOY_DIR/.env.example"
 cp "$SCRIPT_DIR/openclaw-home/.openclaw/openclaw.json" "$DEPLOY_DIR/openclaw.json"
-mkdir -p "$DEPLOY_DIR/openclaw-home/.openclaw/workspace"
 
 echo "  deploying to $DEPLOY_DIR"
 echo ""
@@ -99,13 +125,7 @@ if [ ! -d "$QMD_PATH" ]; then
     exit 1
 fi
 
-# Patch token into openclaw.json
 mkdir -p "$CONFIG_DIR"
-jq --arg token "$GATEWAY_TOKEN" \
-    '.gateway.auth.token = $token' \
-    "$DEPLOY_DIR/openclaw.json" > "$CONFIG_DIR/openclaw.json"
-
-echo "  patched token into openclaw.json"
 echo "  done"
 
 # ── Phase 2: Pull image ───────────────────────────────────────────────────────
@@ -117,21 +137,23 @@ echo "  done"
 # ── Phase 3: openclaw setup ───────────────────────────────────────────────────
 echo "[3/6] Running openclaw setup..."
 
-# Fix permissions so the container's node user (UID 1000) can write to the workspace
-docker run --rm -u root \
-    -v "$DEPLOY_DIR/openclaw-home/.openclaw:/data" \
-    ghcr.io/openclaw/openclaw:latest \
-    chmod -R a+rwX /data
-
 # Setup initializes internal state but overwrites openclaw.json — we restore ours after.
 docker compose run --rm openclaw-cli setup
 
-# Restore our openclaw.json (setup overwrites it)
-jq --arg token "$GATEWAY_TOKEN" \
-    '.gateway.auth.token = $token' \
-    "$DEPLOY_DIR/openclaw.json" > "$CONFIG_DIR/openclaw.json"
+# Merge our settings into the setup-generated openclaw.json.
+# We use * (deep merge) so setup's device pairing + token state is preserved.
+# We exclude gateway.auth from our file so setup's generated token wins.
+jq -s '.[0] * .[1]' \
+    "$CONFIG_DIR/openclaw.json" \
+    <(jq 'del(.gateway.auth)' "$DEPLOY_DIR/openclaw.json") \
+    > /tmp/openclaw-merged.json
+mv /tmp/openclaw-merged.json "$CONFIG_DIR/openclaw.json"
 
-echo "  restored openclaw.json with our config"
+# Sync .env token to match what setup generated
+GATEWAY_TOKEN=$(jq -r '.gateway.auth.token' "$CONFIG_DIR/openclaw.json")
+sed -i "s/^GATEWAY_TOKEN=.*/GATEWAY_TOKEN=$GATEWAY_TOKEN/" "$DEPLOY_DIR/.env"
+
+echo "  merged config into setup-generated openclaw.json"
 echo "  done"
 
 # ── Phase 4: Configure model ──────────────────────────────────────────────────
