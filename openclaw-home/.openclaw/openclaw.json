@@ -92,8 +92,5 @@
         "reminders.add"
       ]
     },
-    "controlUi": {
-      "dangerouslyAllowHostHeaderOriginFallback": true
-    }
   }
 }
