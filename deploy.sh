@@ -165,16 +165,45 @@ sed -i "s/^GATEWAY_TOKEN=.*/GATEWAY_TOKEN=$GATEWAY_TOKEN/" "$DEPLOY_DIR/.env"
 echo "  merged config into setup-generated openclaw.json"
 echo "  done"
 
-# ── Phase 4: Configure model ──────────────────────────────────────────────────
-echo "[4/6] Model configuration..."
-echo "  This will ask for your AI provider and API key."
+# ── Phase 4: Configure model + channel (optional) ────────────────────────────
 echo ""
-docker compose run --rm openclaw-cli configure
-fix_perms
-echo "  done"
+read -rp "  Configure model and channel now? [y/N]: " CONFIGURE_NOW
 
-# ── Phase 5: Start gateway ────────────────────────────────────────────────────
-echo "[5/6] Starting gateway..."
+if [[ "${CONFIGURE_NOW,,}" == "y" ]]; then
+    echo "[4/5] Model configuration..."
+    echo "  This will ask for your AI provider and API key."
+    echo ""
+    docker compose run --rm openclaw-cli configure
+    fix_perms
+    echo "  done"
+
+    echo "[5/5] Channel setup..."
+    echo ""
+    echo "  Which channel do you want to connect?"
+    echo "  1) Slack"
+    echo "  2) Telegram"
+    echo "  3) Discord"
+    echo "  4) Skip for now"
+    echo ""
+    read -rp "  Choice [1-4]: " CHANNEL_CHOICE
+
+    case "$CHANNEL_CHOICE" in
+        1) CHANNEL="slack" ;;
+        2) CHANNEL="telegram" ;;
+        3) CHANNEL="discord" ;;
+        *) CHANNEL_CHOICE=4 ;;
+    esac
+
+    if [ "${CHANNEL_CHOICE}" != "4" ]; then
+        docker compose run --rm openclaw-cli channels add --channel "$CHANNEL"
+        fix_perms
+        docker compose restart openclaw-gateway
+        echo "  channel connected and gateway restarted"
+    fi
+fi
+
+# ── Start gateway ─────────────────────────────────────────────────────────────
+echo "[4/4] Starting gateway..."
 docker compose up -d
 
 echo "  waiting for gateway to be healthy..."
@@ -196,50 +225,18 @@ done
 echo "  gateway is healthy"
 echo "  done"
 
-# ── Phase 6: Channel setup ────────────────────────────────────────────────────
-echo "[6/6] Channel setup..."
-echo ""
-echo "  Which channel do you want to connect?"
-echo "  1) Slack"
-echo "  2) Telegram"
-echo "  3) Discord"
-echo "  4) Skip for now"
-echo ""
-read -rp "  Choice [1-4]: " CHANNEL_CHOICE
-
-case "$CHANNEL_CHOICE" in
-    1) CHANNEL="slack" ;;
-    2) CHANNEL="telegram" ;;
-    3) CHANNEL="discord" ;;
-    4)
-        echo "  Skipping — run this later:"
-        echo "    docker compose run --rm openclaw-cli channels add --channel <type>"
-        echo "    docker compose restart openclaw-gateway"
-        ;;
-    *)
-        echo "  Invalid choice — skipping channel setup."
-        CHANNEL_CHOICE=4
-        ;;
-esac
-
-if [ "${CHANNEL_CHOICE}" != "4" ]; then
-    docker compose run --rm openclaw-cli channels add --channel "$CHANNEL"
-    fix_perms
-    docker compose restart openclaw-gateway
-    echo "  channel connected and gateway restarted"
-fi
-
 # ── Done ──────────────────────────────────────────────────────────────────────
 echo ""
 echo "==================================="
 echo "  OpenClaw is running"
 echo "==================================="
 echo ""
-echo "  Gateway:  http://localhost:${GATEWAY_PORT:-18789}"
 echo "  Location: $DEPLOY_DIR"
 echo "  Logs:     cd $DEPLOY_DIR && docker compose logs -f"
-echo "  TUI:      cd $DEPLOY_DIR && docker compose run --rm openclaw-cli tui --token $GATEWAY_TOKEN"
 echo ""
-echo "  Access the control UI via Tailscale:"
-echo "  http://<tailscale-ip>:${GATEWAY_PORT:-18789}"
+echo "  When ready:"
+echo "  cd $DEPLOY_DIR"
+echo "  docker compose run --rm openclaw-cli configure"
+echo "  docker compose run --rm openclaw-cli channels add --channel slack"
+echo "  docker compose restart openclaw-gateway"
 echo ""
